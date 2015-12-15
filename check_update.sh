@@ -46,7 +46,7 @@ check_in_mustinst()
 	if [ "$1" == "" ];then
 		echo "0"
 	else
-		echo "$MUSTRPMS" | grep "\\$1" >> /dev/null
+		echo "$MUSTINST" | grep "\\$1" >> /dev/null
 		if [ $? -eq 0 ];then
 			echo "1"
 		else
@@ -86,11 +86,14 @@ get_rpm_ver()
 
 check_ver ()
 {
+	echo "Version check..."
 	if [ "$CURRENT_REDOS_VER_SYS" == "" ] || [ "$REDOS_VER" == "" ] || [ "$CURRENT_REDOS_VER_SYS" != "$REDOS_VER" ];then
-		echo "Version is not matching"
-		echo "System\`s version is $CURRENT_REDOS_VER_SYS in /etc/redos-release"
-		echo "But patch update system\`s version to $REDOS_VER"
+		printf "\033[31mVersion is not matching\033[0m\n"
+		printf "\033[31mSystem\`s version is $CURRENT_REDOS_VER_SYS in /etc/redos-release\033[0m\n"
+		printf "\033[31mBut patch update system\`s version to $REDOS_VER\033[0m\n"
 		RESULT="1"
+	else
+		printf "\033[32mVersion is correct.\033[0m\n"
 	fi
 
 	echo ""
@@ -106,7 +109,7 @@ check_add ()
 	fi
 	echo "In this segment, if system don\`t install this package, Patch will install it,"
 	echo "but if system installed this package with any version, Patch will ignore it."
-
+	qemu=`check_install "qemu-img"`
 	i=1
 	for pkg in $ADDRPMS; 
 	do
@@ -125,11 +128,20 @@ check_add ()
 				printf "\033[31m%d: %s was not installed, System have %s but this package in mustinstall segment in Patch. \033[0m\n" "$i" "$pkg" "$pkg"
 				RESULT="1"
 			else
-				printf "\033[32m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+				if [[ "$pkg_ver" < "$ver_in_sys" ]];then
+					printf "\033[34m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+				else
+					printf "\033[32m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+				fi
 			fi
 		else
-			printf "\033[31m%d: %s was not installed, Patch install %s fail. \033[0m\n" "$i" "$pkg_name" "$pkg"
-			RESULT="1"
+			spice_policy_gperftools=`echo "$pkg" | grep -E "spice|policy|gperftools-libs"`
+			if [ "$qemu" == "0" ] && [ "$spice_policy_gperftools" != "" ];then
+				printf "\033[31m%d: %s was not installed, Patch install %s fail. \033[0m\n" "$i" "$pkg_name" "$pkg"
+				RESULT="1"
+			else
+				continue
+			fi
 		fi
 		i=$(($i+1))
 	done
@@ -144,7 +156,7 @@ check_update ()
 		return
 	fi
 
-	echo "In this segment, if system don\`t install this package, Patch will install it,"
+	echo "In this segment, if system don\`t install this package, Patch will ignore it,"
 	echo "if system has package with old version, Patch will update it,"
 	echo "if package\`version is newer than package in patch, Patch will prompt whether install it."
 
@@ -165,7 +177,7 @@ check_update ()
 			pkg_in_sys=`rpm -q "$pkg_name"`
 			ver_in_sys=`get_rpm_ver "$pkg_name"`
 			if [[ "$pkg_ver" > "$ver_in_sys" ]];then
-				printf "\033[31m%d: %s in system is older than Patch(%s). Patch installed %s fail.\033[0m\n" "$i" "$pkg_in_sys" "$pkg" "$pkg"
+				printf "\033[31m%d: %s in system is older than Patch(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"
 				RESULT="1"
 			elif [[ "$pkg_ver" < "$ver_in_sys" ]];then
 				if [[ "$in_must" == "1" ]];then
@@ -178,8 +190,7 @@ check_update ()
 				printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
 			fi
 		else
-			printf "\033[31m%d: %s was not installed.\033[0m\n" "$i" "$pkg"
-			RESULT="1"
+			continue
 		fi
 		i=$(($i+1))
 	done
@@ -244,6 +255,7 @@ main ()
 	else
 		printf "\033[31m %-20s \033[0m\n" "Failed"
 	fi
+	rm -rf "$PATCH_DIR"".tmp"
 }
 
 

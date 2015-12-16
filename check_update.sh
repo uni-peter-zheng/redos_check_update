@@ -41,6 +41,71 @@ check_install()
 	fi
 }
 
+# Return:
+#	0 - $1 < $2
+#	1 - $1 = $2
+#	2 - $1 > $2
+is_newer()
+{
+	if [ "$1" == "" ] && [ "$2" == "" ];then
+		echo "1"
+	fi
+	if [ "$1" == "" ];then
+		echo "0"
+	fi
+	if [ "$2" == "" ];then
+		echo "2"
+	fi
+
+	ver1="$1"
+	ver2="$2"
+	ver1_big=`echo "$ver1" | cut -d '.' -f 1`
+	ver1_mid=`echo "$ver1" | cut -d '.' -f 2`
+	ver1_little=`echo "$ver1" | cut -d '.' -f 3`
+	ver2_big=`echo "$ver2" | cut -d '.' -f 1`
+	ver2_mid=`echo "$ver2" | cut -d '.' -f 2`
+	ver2_little=`echo "$ver2" | cut -d '.' -f 3`
+
+	# 0: $1 < $2
+	# 2: $1 > $2
+	# 1: $1 = $2
+	# -gt : >
+	# -lt : <
+	res_big=`expr $ver1_big - $ver2_big`
+	if [ $res_big -gt 0 ];then
+		echo "2"
+	elif [ $res_big -lt 0 ];then
+		echo "0"
+	else
+		res_mid=`expr $ver1_mid - $ver2_mid`
+		if [ $res_mid -gt 0 ];then
+			echo "2"
+		elif [ $res_mid -lt 0 ];then
+			echo "0"
+		else
+			if [ "$ver1_little" != "" ] && [ "$ver2_little" != "" ];then
+				res_little=`expr $ver1_little - $ver2_little`
+				if [ $res_little -gt 0 ];then
+					echo "2"
+				elif [ $res_little -lt 0 ];then
+					echo "0"
+				else
+					echo "1"
+				fi
+			fi
+			if [ "$ver1_little" == "" ] && [ "$ver2_little" == "" ];then
+				echo "1"
+			fi
+			if [ "$ver1_little" == "" ];then
+				echo "0"
+			fi
+			if [ "$ver2_little" == "" ];then
+				echo "2"
+			fi
+		fi
+	fi
+}
+
 check_in_mustinst()
 {
 	if [ "$1" == "" ];then
@@ -128,7 +193,8 @@ check_add ()
 				printf "\033[31m%d: %s was not installed, System have %s but this package in mustinstall segment in Patch. \033[0m\n" "$i" "$pkg" "$pkg"
 				RESULT="1"
 			else
-				if [[ "$pkg_ver" < "$ver_in_sys" ]];then
+				compare_ver=`is_newer "$pkg_ver" "$ver_in_sys"`
+				if [ "$compare_ver" == "0" ];then
 					printf "\033[34m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
 				else
 					printf "\033[32m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
@@ -176,11 +242,12 @@ check_update ()
 		if [ "$res" == "0" ];then
 			pkg_in_sys=`rpm -q "$pkg_name"`
 			ver_in_sys=`get_rpm_ver "$pkg_name"`
-			if [[ "$pkg_ver" > "$ver_in_sys" ]];then
+			compare_ver=`is_newer "$pkg_ver" "$ver_in_sys"`
+			if [ "$compare_ver" == "2" ];then
 				printf "\033[31m%d: %s in system is older than Patch(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"
 				RESULT="1"
-			elif [[ "$pkg_ver" < "$ver_in_sys" ]];then
-				if [[ "$in_must" == "1" ]];then
+			elif [ "$compare_ver" == "0" ];then
+				if [ "$in_must" == "1" ];then
 					printf "\033[31m%d: %s in system is newer than Patch(%s). But package is in mustinstall segment\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
 					RESULT="1"
 				else
@@ -195,6 +262,36 @@ check_update ()
 		i=$(($i+1))
 	done
 	echo ""
+}
+
+check_in_iso()
+{
+	echo "Check rpms in system\`s ISO"
+
+	i=1
+	for pkg in $ISORPMS;
+	do
+		pkg_name=`echo $pkg | awk -F'-[0-9.]*-' '{print $1}'`
+		pkg_ver=`echo "$pkg" | grep -o "\-[0-9\.]*\-" | grep -o "[0-9\.]*"`
+		res=`check_install "$pkg_name"`
+		if [ "$res" == "0" ];then
+			pkg_in_sys=`rpm -q "$pkg_name"`
+			ver_in_sys=`get_rpm_ver "$pkg_name"`
+			compare_ver=`is_newer "$pkg_ver" "$ver_in_sys"`
+			if [ "$compare_ver" == "2" ];then
+				printf "\033[31m%d: %s in system is older than ISO(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"
+				RESULT="1"
+			elif [ "$compare_ver" == "0" ];then
+				printf "\033[34m%d: %s in system is newer than ISO(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+			else
+				#printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
+				continue
+			fi
+		else
+			continue
+		fi
+		i=$(($i+1))
+	done
 }
 
 get_config_data()
@@ -219,13 +316,39 @@ get_config_data()
 
 main ()
 {
-
+	
 	if [ "$1" == "" ];then
 		echo "This ckeck script need patch\`s path."
 		echo "Example: ./check_update.sh xx/xxxx.patch"
 		return
 	fi
 
+	if [ "$1" == "-p" ];then
+		if [ "$2" == "" ];then
+			echo "Need a package path."
+			return
+		fi
+		
+		if [ ! -d "$2" ];then
+			echo "Need a valid path."
+			return
+		fi
+		ISO_PACK_DIR="$2"
+		if [ "${ISO_PACK_DIR: -1}" != "/" ];then
+			ISO_PACK_DIR="$ISO_PACK_DIR""/"
+		fi
+		ISORPMS=`ls "$ISO_PACK_DIR"`
+		SYSRPMS=`rpm -qa`
+		check_in_iso
+
+		printf "Result: "
+		if [ "$RESULT" == "0" ];then
+			printf "\033[32m %-20s \033[0m\n" "Success"
+		else
+			printf "\033[31m %-20s \033[0m\n" "Failed"
+		fi
+		return
+	fi
 	PATCH_DIR=$(dirname "$1")"/"
 	PATCH_NAME=$(basename "$1")
 	PATCH_FILE="$PATCH_DIR""$PATCH_NAME"

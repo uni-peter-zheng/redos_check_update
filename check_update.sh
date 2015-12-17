@@ -12,6 +12,9 @@ else
 	CURRENT_REDOS_VER_SYS=""
 fi
 
+SHOW_ALL="0"
+CHECK_ISO="0"
+CHECK_PATCH="0"
 PATCH_DIR=""
 PATCH_NAME=""
 PATCH_FILE=""
@@ -197,7 +200,11 @@ check_add ()
 				if [ "$compare_ver" == "0" ];then
 					printf "\033[34m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
 				else
-					printf "\033[32m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+					if [ "$SHOW_ALL" == "1" ];then
+						printf "\033[32m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+					else
+						continue
+					fi
 				fi
 			fi
 		else
@@ -237,7 +244,7 @@ check_update ()
 		in_must=`check_in_mustinst "$pkg"`
 		pkg_name=`echo $pkg | awk -F'-[0-9.]*-' '{print $1}'`
 		pkg_ver=`echo $pkg | grep -o "\-[0-9\.]*\-" | grep -o "[0-9\.]*"`
-		
+
 		res=`check_install "$pkg_name"`
 		if [ "$res" == "0" ];then
 			pkg_in_sys=`rpm -q "$pkg_name"`
@@ -254,7 +261,11 @@ check_update ()
 					printf "\033[34m%d: %s in system is newer than Patch(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
 				fi
 			else
-				printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
+				if [ "$SHOW_ALL" == "1" ];then
+					printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
+				else
+					continue
+				fi
 			fi
 		else
 			continue
@@ -284,8 +295,11 @@ check_in_iso()
 			elif [ "$compare_ver" == "0" ];then
 				printf "\033[34m%d: %s in system is newer than ISO(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
 			else
-				#printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
-				continue
+				if [ "$SHOW_ALL" == "1" ];then
+					printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
+				else
+					continue
+				fi
 			fi
 		else
 			continue
@@ -316,62 +330,33 @@ get_config_data()
 
 main ()
 {
-	
-	if [ "$1" == "" ];then
-		echo "This ckeck script need patch\`s path."
-		echo "Example: ./check_update.sh xx/xxxx.patch"
-		return
-	fi
-
-	if [ "$1" == "-p" ];then
-		if [ "$2" == "" ];then
-			echo "Need a package path."
-			return
-		fi
-		
-		if [ ! -d "$2" ];then
-			echo "Need a valid path."
-			return
-		fi
-		ISO_PACK_DIR="$2"
-		if [ "${ISO_PACK_DIR: -1}" != "/" ];then
-			ISO_PACK_DIR="$ISO_PACK_DIR""/"
-		fi
-		ISORPMS=`ls "$ISO_PACK_DIR"`
-		SYSRPMS=`rpm -qa`
+	if [ "$CHECK_ISO" == "1" ];then
 		check_in_iso
+	fi
 
-		printf "Result: "
-		if [ "$RESULT" == "0" ];then
-			printf "\033[32m %-20s \033[0m\n" "Success"
-		else
-			printf "\033[31m %-20s \033[0m\n" "Failed"
+	if [ "$CHECK_PATCH" == "1" ];then
+		PATCH_FILE="$PATCH_DIR""$PATCH_NAME"
+		if [ ! -f "$PATCH_FILE" ];then
+			echo "Patch is not exist."
+			return
 		fi
-		return
-	fi
-	PATCH_DIR=$(dirname "$1")"/"
-	PATCH_NAME=$(basename "$1")
-	PATCH_FILE="$PATCH_DIR""$PATCH_NAME"
-	if [ ! -f "$PATCH_FILE" ];then
-		echo "Patch is not exist."
-		return
-	fi
-	chmod +x "$PATCH_FILE"
-	echo "Start checking..."
-	$PATCH_FILE -debug
-	echo ""
-	config_dir_name=`echo "$PATCH_NAME" | awk -F'.patch' '{print $1}'`	
-	PATCH_CONFIG="$PATCH_DIR"".tmp/""$config_dir_name""/redospatch.cfg"
-	if [ ! -f "$PATCH_CONFIG" ];then
-		echo "Patch\`s config is not exist.($PATCH_CONFIG)"
-		return
-	fi
+		chmod +x "$PATCH_FILE"
+		echo "Start checking..."
+		$PATCH_FILE -debug
+		echo ""
+		config_dir_name=`echo "$PATCH_NAME" | awk -F'.patch' '{print $1}'`	
+		PATCH_CONFIG="$PATCH_DIR"".tmp/""$config_dir_name""/redospatch.cfg"
+		if [ ! -f "$PATCH_CONFIG" ];then
+			echo "Patch\`s config is not exist.($PATCH_CONFIG)"
+			return
+		fi
 
-	get_config_data
+		get_config_data
 
-	check_ver
-	check_add
-	check_update
+		check_ver
+		check_add
+		check_update
+	fi
 	printf "Result: "
 	if [ "$RESULT" == "0" ];then
 		printf "\033[32m %-20s \033[0m\n" "Success"
@@ -381,7 +366,54 @@ main ()
 	rm -rf "$PATCH_DIR"".tmp"
 }
 
-
+usage()
+{
+	echo -e "Usage:check_update.sh [Options]"
+	echo -e ""
+	echo -e "Options:"
+	printf "\t%-40s%-20s\n" "-h" "Show this help message and exit"
+	printf "\t%-40s%-20s\n" "-a" "Show all info in checking."
+	printf "\t%-40s%-20s\n" "-i <iso/Packages>" "Check local system\`s rpms and ISO\`s rpms"
+	printf "\t%-40s%-20s\n" "-p <patch_file>" "Check local system\`s rpms and patch\`s rpms."
+	exit 0
+}
 # Start
-main $@
+while getopts "ai:hp:" arg 
+do
+	case $arg in
+		a)
+			SHOW_ALL="1"
+			;;
+		h)
+			usage
+			;;
+		i)
+			if [ ! -d "$OPTARG" ]; then
+				echo -e "$OPTARG is not exist."
+				exit 1
+			fi
+			CHECK_ISO="1"
+			ISO_PACK_DIR="$OPTARG"
+			if [ "${ISO_PACK_DIR: -1}" != "/" ];then
+				ISO_PACK_DIR="$ISO_PACK_DIR""/"
+			fi
+			ISORPMS=`ls "$ISO_PACK_DIR"`
+			SYSRPMS=`rpm -qa`
+			;;
+		p)
+			if [ ! -f "$OPTARG" ]; then
+				echo -e "$OPTARG is not exist."
+				exit 1
+			fi
+			CHECK_PATCH="1"
+			PATCH_DIR=$(dirname "$OPTARG")"/"
+			PATCH_NAME=$(basename "$OPTARG")
+			;;
+		?)
+			echo "unkonw argument"
+			usage
+			;;
+	esac
+done
+main
 

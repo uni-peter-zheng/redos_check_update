@@ -44,70 +44,57 @@ check_install()
 	fi
 }
 
+compare_ver()
+{
+    if [ "$1" == "" ] && [ "$2" == "" ];then
+        echo "1"
+        return
+    fi
+    if [ "$1" == "" ];then
+        echo "0"
+        return
+    fi
+    if [ "$2" == "" ];then
+        echo "2"
+        return
+    fi
+
+    ver1=`echo $1 | tr -d "a-zA-Z"`
+    ver2=`echo $2 | tr -d "a-zA-Z"`
+
+    i=0
+    while :
+    do
+        i=$(($i+1)) 
+        ver1_num=`echo "$ver1" | awk -F'.' '{print $'$i'}'`
+        ver2_num=`echo "$ver2" | awk -F'.' '{print $'$i'}'`
+        if [ "$ver1_num" != "" ] && [ "$ver2_num" != "" ];then
+            res=`expr $ver1_num - $ver2_num`
+            if [ $res -gt 0 ];then
+                echo "2"
+                return
+            elif [ $res -lt 0 ];then
+                echo "0"
+                return
+            else
+                continue
+            fi
+        fi
+        if [ "$ver1_num" == "" ];then
+            echo "0"
+            return
+        fi
+        if [ "$ver2_num" == "" ];then
+            echo "2"
+            return
+        fi
+    done
+    echo "1"
+}
 # Return:
 #	0 - $1 < $2
 #	1 - $1 = $2
 #	2 - $1 > $2
-is_newer()
-{
-	if [ "$1" == "" ] && [ "$2" == "" ];then
-		echo "1"
-	fi
-	if [ "$1" == "" ];then
-		echo "0"
-	fi
-	if [ "$2" == "" ];then
-		echo "2"
-	fi
-
-	ver1="$1"
-	ver2="$2"
-	ver1_big=`echo "$ver1" | cut -d '.' -f 1`
-	ver1_mid=`echo "$ver1" | cut -d '.' -f 2`
-	ver1_little=`echo "$ver1" | cut -d '.' -f 3`
-	ver2_big=`echo "$ver2" | cut -d '.' -f 1`
-	ver2_mid=`echo "$ver2" | cut -d '.' -f 2`
-	ver2_little=`echo "$ver2" | cut -d '.' -f 3`
-
-	# 0: $1 < $2
-	# 2: $1 > $2
-	# 1: $1 = $2
-	# -gt : >
-	# -lt : <
-	res_big=`expr $ver1_big - $ver2_big`
-	if [ $res_big -gt 0 ];then
-		echo "2"
-	elif [ $res_big -lt 0 ];then
-		echo "0"
-	else
-		res_mid=`expr $ver1_mid - $ver2_mid`
-		if [ $res_mid -gt 0 ];then
-			echo "2"
-		elif [ $res_mid -lt 0 ];then
-			echo "0"
-		else
-			if [ "$ver1_little" != "" ] && [ "$ver2_little" != "" ];then
-				res_little=`expr $ver1_little - $ver2_little`
-				if [ $res_little -gt 0 ];then
-					echo "2"
-				elif [ $res_little -lt 0 ];then
-					echo "0"
-				else
-					echo "1"
-				fi
-			fi
-			if [ "$ver1_little" == "" ] && [ "$ver2_little" == "" ];then
-				echo "1"
-			fi
-			if [ "$ver1_little" == "" ];then
-				echo "0"
-			fi
-			if [ "$ver2_little" == "" ];then
-				echo "2"
-			fi
-		fi
-	fi
-}
 
 check_in_mustinst()
 {
@@ -280,19 +267,27 @@ check_in_iso()
 	echo "Check rpms in system\`s ISO"
 
 	i=1
-	for pkg in $ISORPMS;
+	for pkg in $SYSRPMS;
 	do
-		pkg_name=`echo $pkg | awk -F'-[0-9.]*-' '{print $1}'`
-		pkg_ver=`echo "$pkg" | grep -o "\-[0-9\.]*\-" | grep -o "[0-9\.]*"`
-		res=`check_install "$pkg_name"`
-		if [ "$res" == "0" ];then
-			pkg_in_sys=`rpm -q "$pkg_name"`
-			ver_in_sys=`get_rpm_ver "$pkg_name"`
-			compare_ver=`is_newer "$pkg_ver" "$ver_in_sys"`
-			if [ "$compare_ver" == "2" ];then
+		pkg_name=`rpm -qi "$pkg" | grep "Name" | awk -F'Name[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
+		pkg_ver=`rpm -qi "$pkg" | grep "Version" | awk -F'Version[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
+        pkg_release=`rpm -qi "$pkg" | grep "Release" | awk -F'Release[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
+        echo "$ISORPMS" | grep "$pkg_name" >> /dev/null
+
+		if [ $? -ne 0 ];then
+            pkg_iso_name=`echo "$ISORPMS" | grep "$pkg_name"`
+		    pkg_iso_ver=`rpm -qpi "$pkg" | grep "Version" | awk -F'Version[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
+            pkg_iso_release=`rpm -qpi "$pkg" | grep "Release" | awk -F'Release[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
+			ver_res=`compare_ver "$pkg_ver" "$ver_in_sys"`
+            if [ "$res" == "1" ];then
+                res=`compare_ver "$pkg_release" "$pkg_iso_release"`
+            else
+                res="$ver_res"
+            fi
+			if [ "$res" == "2" ];then
 				printf "\033[31m%d: %s in system is older than ISO(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"
 				RESULT="1"
-			elif [ "$compare_ver" == "0" ];then
+			elif [ "$res" == "0" ];then
 				printf "\033[34m%d: %s in system is newer than ISO(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
 			else
 				if [ "$SHOW_ALL" == "1" ];then
@@ -330,6 +325,7 @@ get_config_data()
 
 main ()
 {
+    SYSRPMS=`rpm -qa`
 	if [ "$CHECK_ISO" == "1" ];then
 		check_in_iso
 	fi
@@ -357,6 +353,7 @@ main ()
 		check_add
 		check_update
 	fi
+
 	printf "Result: "
 	if [ "$RESULT" == "0" ];then
 		printf "\033[32m %-20s \033[0m\n" "Success"
@@ -398,7 +395,6 @@ do
 				ISO_PACK_DIR="$ISO_PACK_DIR""/"
 			fi
 			ISORPMS=`ls "$ISO_PACK_DIR"`
-			SYSRPMS=`rpm -qa`
 			;;
 		p)
 			if [ ! -f "$OPTARG" ]; then

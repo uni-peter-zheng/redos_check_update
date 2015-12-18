@@ -218,7 +218,7 @@ check_add ()
 show_update_title()
 {
 	if [ "$SHOW_UPDATE_TITLE" == "0" ];then
-		printf "     %-80s%-80sResult\n" "System" "ISO"
+		printf "     %-80s%-80sResult\n" "System" "Patch"
 		SHOW_UPDATE_TITLE="1"
 	fi
 }
@@ -390,7 +390,7 @@ main ()
 			return
 		fi
 		chmod +x "$PATCH_FILE"
-		$PATCH_FILE -debug
+		#$PATCH_FILE -debug
 		echo ""
 		config_dir_name=`echo "$PATCH_NAME" | awk -F'.patch' '{print $1}'`	
 		PATCH_CONFIG="$PWD"".tmp/""$config_dir_name""/redospatch.cfg"
@@ -414,7 +414,7 @@ main ()
 	else
 		printf "\033[31m %-20s \033[0m\n" "Failed"
 	fi
-	rm -rf "$PWD"".tmp"
+	#rm -rf "$PWD"".tmp"
 }
 
 usage()

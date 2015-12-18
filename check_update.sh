@@ -33,6 +33,9 @@ l_update=0
 length=0
 
 RESULT="0"
+SHOW_ISO_TITLE="0"
+SHOW_UPDATE_TITLE="0"
+PWD=`pwd`"/"
 
 check_install()
 {
@@ -44,6 +47,10 @@ check_install()
 	fi
 }
 
+# Return:
+#	0 - $1 < $2
+#	1 - $1 = $2
+#	2 - $1 > $2
 compare_ver()
 {
     if [ "$1" == "" ] && [ "$2" == "" ];then
@@ -66,8 +73,8 @@ compare_ver()
     while :
     do
         i=$(($i+1)) 
-        ver1_num=`echo "$ver1" | awk -F'.' '{print $'$i'}'`
-        ver2_num=`echo "$ver2" | awk -F'.' '{print $'$i'}'`
+        ver1_num=`echo "$ver1" | awk -F'[._]' '{print $'$i'}'`
+        ver2_num=`echo "$ver2" | awk -F'[._]' '{print $'$i'}'`
         if [ "$ver1_num" != "" ] && [ "$ver2_num" != "" ];then
             res=`expr $ver1_num - $ver2_num`
             if [ $res -gt 0 ];then
@@ -80,6 +87,10 @@ compare_ver()
                 continue
             fi
         fi
+		if [ "$ver1_num" == "" ] && [ "$ver2_num" == "" ];then
+			echo "1"
+			return
+		fi
         if [ "$ver1_num" == "" ];then
             echo "0"
             return
@@ -89,12 +100,7 @@ compare_ver()
             return
         fi
     done
-    echo "1"
 }
-# Return:
-#	0 - $1 < $2
-#	1 - $1 = $2
-#	2 - $1 > $2
 
 check_in_mustinst()
 {
@@ -208,6 +214,14 @@ check_add ()
 	echo ""
 }
 
+show_update_title()
+{
+	if [ "$SHOW_UPDATE_TITLE" == "0" ];then
+		printf "     %-80s%-80sResult\n" "System" "ISO"
+		SHOW_UPDATE_TITLE="1"
+	fi
+}
+
 check_update ()
 {
 	echo "UPDATE segment check..."
@@ -229,27 +243,42 @@ check_update ()
 		fi
 
 		in_must=`check_in_mustinst "$pkg"`
-		pkg_name=`echo $pkg | awk -F'-[0-9.]*-' '{print $1}'`
-		pkg_ver=`echo $pkg | grep -o "\-[0-9\.]*\-" | grep -o "[0-9\.]*"`
+		pkg_name=`rpm -qpi "$RPMS_DIR""$pkg" 2>/dev/null | grep "Name" | awk -F'Name[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
 
 		res=`check_install "$pkg_name"`
 		if [ "$res" == "0" ];then
-			pkg_in_sys=`rpm -q "$pkg_name"`
-			ver_in_sys=`get_rpm_ver "$pkg_name"`
-			compare_ver=`is_newer "$pkg_ver" "$ver_in_sys"`
-			if [ "$compare_ver" == "2" ];then
-				printf "\033[31m%d: %s in system is older than Patch(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"
+			pkg_update_ver=`rpm -qpi "$RPMS_DIR""$pkg" 2>/dev/null | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_update_release=`rpm -qpi "$RPMS_DIR""$pkg" 2>/dev/null | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_sys_name=`rpm -qa $pkg_name`
+			pkg_ver=`rpm -qi "$pkg_name" | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_release=`rpm -qi "$pkg_name" | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			ver_res=`compare_ver "$pkg_ver" "$pkg_update_ver"`
+
+			#	0 - $1 < $2
+			#	1 - $1 = $2
+			#	2 - $1 > $2
+            if [ "$ver_res" == "1" ];then
+                res=`compare_ver "$pkg_release" "$pkg_update_release"`
+            else
+                res="$ver_res"
+            fi
+
+			if [ "$res" == "0" ];then
+				show_update_title
+				printf "\033[31m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Older"
 				RESULT="1"
-			elif [ "$compare_ver" == "0" ];then
+			elif [ "$res" == "2" ];then
+				show_update_title
 				if [ "$in_must" == "1" ];then
-					printf "\033[31m%d: %s in system is newer than Patch(%s). But package is in mustinstall segment\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+					printf "\033[31m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Newer(must install)"	
 					RESULT="1"
 				else
-					printf "\033[34m%d: %s in system is newer than Patch(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+					printf "\033[34m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Newer"	
 				fi
 			else
 				if [ "$SHOW_ALL" == "1" ];then
-					printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
+					show_update_title
+					printf "\033[32m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Success" 	
 				else
 					continue
 				fi
@@ -259,7 +288,15 @@ check_update ()
 		fi
 		i=$(($i+1))
 	done
-	echo ""
+}
+
+
+show_iso_title()
+{
+	if [ "$SHOW_ISO_TITLE" == "0" ];then
+		printf "     %-80s%-80sResult\n" "System" "ISO"
+		SHOW_ISO_TITLE="1"
+	fi
 }
 
 check_in_iso()
@@ -267,31 +304,39 @@ check_in_iso()
 	echo "Check rpms in system\`s ISO"
 
 	i=1
-	for pkg in $SYSRPMS;
+	for pkg in $ISORPMS;
 	do
-		pkg_name=`rpm -qi "$pkg" | grep "Name" | awk -F'Name[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
-		pkg_ver=`rpm -qi "$pkg" | grep "Version" | awk -F'Version[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
-        pkg_release=`rpm -qi "$pkg" | grep "Release" | awk -F'Release[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
-        echo "$ISORPMS" | grep "$pkg_name" >> /dev/null
+		pkg_name=`rpm -qpi "$ISO_PACK_DIR""$pkg" 2>/dev/null | grep "Name" | awk -F'Name[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
 
-		if [ $? -ne 0 ];then
-            pkg_iso_name=`echo "$ISORPMS" | grep "$pkg_name"`
-		    pkg_iso_ver=`rpm -qpi "$pkg" | grep "Version" | awk -F'Version[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
-            pkg_iso_release=`rpm -qpi "$pkg" | grep "Release" | awk -F'Release[ \f\r\t\v*]:[ \f\r\t\v*]' '{print $2}'`
-			ver_res=`compare_ver "$pkg_ver" "$ver_in_sys"`
-            if [ "$res" == "1" ];then
+		res=`check_install "$pkg_name"`
+		if [ "$res" == "0" ];then
+			pkg_iso_ver=`rpm -qpi "$ISO_PACK_DIR""$pkg" 2>/dev/null | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_iso_release=`rpm -qpi "$ISO_PACK_DIR""$pkg" 2>/dev/null | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_sys_name=`rpm -qa $pkg_name`
+			pkg_ver=`rpm -qi "$pkg_name" | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_release=`rpm -qi "$pkg_name" | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			ver_res=`compare_ver "$pkg_ver" "$pkg_iso_ver"`
+
+			#	0 - $1 < $2
+			#	1 - $1 = $2
+			#	2 - $1 > $2
+            if [ "$ver_res" == "1" ];then
                 res=`compare_ver "$pkg_release" "$pkg_iso_release"`
             else
                 res="$ver_res"
             fi
-			if [ "$res" == "2" ];then
-				printf "\033[31m%d: %s in system is older than ISO(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"
+
+			if [ "$res" == "0" ];then
+				show_iso_title
+				printf "\033[31m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Older"
 				RESULT="1"
-			elif [ "$res" == "0" ];then
-				printf "\033[34m%d: %s in system is newer than ISO(%s).\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+			elif [ "$res" == "2" ];then
+				show_iso_title
+				printf "\033[34m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Newer"	
 			else
 				if [ "$SHOW_ALL" == "1" ];then
-					printf "\033[32m%d: %s was installed.\033[0m\n" "$i" "$pkg_in_sys"	
+					show_iso_title
+					printf "\033[32m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Success" 	
 				else
 					continue
 				fi
@@ -325,9 +370,11 @@ get_config_data()
 
 main ()
 {
+	echo "Start checking..."
     SYSRPMS=`rpm -qa`
 	if [ "$CHECK_ISO" == "1" ];then
 		check_in_iso
+		echo ""
 	fi
 
 	if [ "$CHECK_PATCH" == "1" ];then
@@ -337,11 +384,11 @@ main ()
 			return
 		fi
 		chmod +x "$PATCH_FILE"
-		echo "Start checking..."
 		$PATCH_FILE -debug
 		echo ""
 		config_dir_name=`echo "$PATCH_NAME" | awk -F'.patch' '{print $1}'`	
-		PATCH_CONFIG="$PATCH_DIR"".tmp/""$config_dir_name""/redospatch.cfg"
+		PATCH_CONFIG="$PWD"".tmp/""$config_dir_name""/redospatch.cfg"
+		RPMS_DIR="$PWD"".tmp/""$config_dir_name""/rpms/"
 		if [ ! -f "$PATCH_CONFIG" ];then
 			echo "Patch\`s config is not exist.($PATCH_CONFIG)"
 			return
@@ -350,8 +397,9 @@ main ()
 		get_config_data
 
 		check_ver
-		check_add
+#		check_add
 		check_update
+		echo ""
 	fi
 
 	printf "Result: "
@@ -360,7 +408,7 @@ main ()
 	else
 		printf "\033[31m %-20s \033[0m\n" "Failed"
 	fi
-	rm -rf "$PATCH_DIR"".tmp"
+	rm -rf "$PWD"".tmp"
 }
 
 usage()
@@ -411,5 +459,6 @@ do
 			;;
 	esac
 done
+
 main
 

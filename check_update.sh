@@ -20,6 +20,7 @@ PATCH_NAME=""
 PATCH_FILE=""
 PATCH_CONFIG=""
 REDOS_VER_PATCH=""
+ISO_FILE=""
 
 REDOS_VER=""
 DELRPMS=""
@@ -373,7 +374,12 @@ main ()
 	echo "Start checking..."
     SYSRPMS=`rpm -qa`
 	if [ "$CHECK_ISO" == "1" ];then
+		`mkdir -p "./.tmp_mnt_iso"`
+		`mount "$ISO_FILE" "./.tmp_mnt_iso" 2>/dev/null`
+		ISO_PACK_DIR="./.tmp_mnt_iso/Packages/"
+		ISORPMS=`ls "$ISO_PACK_DIR"`
 		check_in_iso
+		umount "./.tmp_mnt_iso"
 		echo ""
 	fi
 
@@ -433,16 +439,12 @@ do
 			usage
 			;;
 		i)
-			if [ ! -d "$OPTARG" ]; then
+			if [ ! -f "$OPTARG" ]; then
 				echo -e "$OPTARG is not exist."
 				exit 1
 			fi
 			CHECK_ISO="1"
-			ISO_PACK_DIR="$OPTARG"
-			if [ "${ISO_PACK_DIR: -1}" != "/" ];then
-				ISO_PACK_DIR="$ISO_PACK_DIR""/"
-			fi
-			ISORPMS=`ls "$ISO_PACK_DIR"`
+			ISO_FILE="$OPTARG"
 			;;
 		p)
 			if [ ! -f "$OPTARG" ]; then

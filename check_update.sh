@@ -36,6 +36,7 @@ length=0
 RESULT="0"
 SHOW_ISO_TITLE="0"
 SHOW_UPDATE_TITLE="0"
+SHOW_ADD_TITLE="0"
 PWD=`pwd`"/"
 
 check_install()
@@ -161,6 +162,22 @@ check_ver ()
 	echo ""
 }
 
+show_add_title()
+{
+	if [ "$SHOW_ADD_TITLE" == "0" ];then
+		printf "     %-80s%-80sResult\n" "System" "Patch"
+		SHOW_ADD_TITLE="1"
+	fi
+}
+
+show_update_title()
+{
+	if [ "$SHOW_UPDATE_TITLE" == "0" ];then
+		printf "     %-80s%-80sResult\n" "System" "Patch"
+		SHOW_UPDATE_TITLE="1"
+	fi
+}
+
 check_add ()
 {
 	echo "ADD segment check..."
@@ -179,48 +196,84 @@ check_add ()
 		if [ "$in_deny" == "1" ];then
 			continue
 		fi
-		in_must=`check_in_mustinst "$pkg"`
-		pkg_name=`echo $pkg | awk -F'-[0-9.]*-' '{print $1}'`
-		pkg_ver=`echo $pkg | grep -o "\-[0-9\.]*\-" | grep -o "[0-9\.]*"`
+		pkg_name=`rpm -qpi "$RPMS_DIR""$pkg" 2>/dev/null | grep "Name" | awk -F'Name[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+		
 		res=`check_install "$pkg_name"`
 		if [ "$res" == "0" ];then
-			pkg_in_sys=`rpm -q "$pkg_name"`
-			ver_in_sys=`get_rpm_ver "$pkg_name"`
-			if [ "$in_must" == "1" ] && [[ "$pkg_ver" != "$ver_in_sys" ]];then
-				printf "\033[31m%d: %s was not installed, System have %s but this package in mustinstall segment in Patch. \033[0m\n" "$i" "$pkg" "$pkg"
-				RESULT="1"
-			else
-				compare_ver=`is_newer "$pkg_ver" "$ver_in_sys"`
-				if [ "$compare_ver" == "0" ];then
-					printf "\033[34m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+			in_must=`check_in_mustinst "$pkg"`
+			pkg_update_ver=`rpm -qpi "$RPMS_DIR""$pkg" 2>/dev/null | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_update_release=`rpm -qpi "$RPMS_DIR""$pkg" 2>/dev/null | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_sys_name=`rpm -qa $pkg_name`
+			pkg_ver=`rpm -qi "$pkg_name" | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_release=`rpm -qi "$pkg_name" | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			ver_res=`compare_ver "$pkg_ver" "$pkg_update_ver"`
+
+			#	0 - $1 < $2
+			#	1 - $1 = $2
+			#	2 - $1 > $2
+            if [ "$ver_res" == "1" ];then
+                res=`compare_ver "$pkg_release" "$pkg_update_release"`
+            else
+                res="$ver_res"
+            fi
+
+			if [ "$res" == "2" ];then
+				if [ "$in_must" == "1" ];then
+					show_add_title
+					printf "\033[31m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Newer(must install)"
+					RESULT="1"
 				else
 					if [ "$SHOW_ALL" == "1" ];then
-						printf "\033[32m%d: %s was installed.(%s in Patch)\033[0m\n" "$i" "$pkg_in_sys" "$pkg"	
+						show_add_title
+						printf "\033[32m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Success(Newer)" 	
+					else
+						continue
+					fi
+				fi
+			elif [ "$res" == "0" ];then
+				if [ "$in_must" == "1" ];then
+					show_add_title
+					printf "\033[31m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Older(must install)"
+					RESULT="1"
+				else
+					if [ "$SHOW_ALL" == "1" ];then
+						show_add_title
+						printf "\033[32m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Success(Older)" 	
+					else
+						continue
+					fi
+				fi
+			else
+				if [ "$SHOW_ALL" == "1" ];then
+					show_add_title
+					printf "\033[32m%-5s%-80s%-80s%s\033[0m\n" "$i:" "$pkg_sys_name.rpm" "$pkg" "Success" 	
+				else
+					continue
+				fi
+			fi
+		else
+			spice_policy_gperftools=`echo "$pkg" | grep -E "spice|policy|gperftools-libs"`
+			if [ "$spice_policy_gperftools" == "" ];then
+				show_add_title
+				printf "\033[31m%-5s%-80s%-80s%s\033[0m\n" "$i:" " " "$pkg" "Failed"
+				RESULT="1"
+			else
+				if [ "$qemu" == "0" ];then
+					show_add_title
+					printf "\033[31m%-5s%-80s%-80s%s\033[0m\n" "$i:" " " "$pkg" "Failed"
+					RESULT="1"
+				else
+					if [ "$SHOW_ALL" == "1" ];then
+						show_add_title
+						printf "\033[32m%-5s%-80s%-80s%s\033[0m\n" "$i:" " " "$pkg" "Skip" 	
 					else
 						continue
 					fi
 				fi
 			fi
-		else
-			spice_policy_gperftools=`echo "$pkg" | grep -E "spice|policy|gperftools-libs"`
-			if [ "$qemu" == "0" ] && [ "$spice_policy_gperftools" != "" ];then
-				printf "\033[31m%d: %s was not installed, Patch install %s fail. \033[0m\n" "$i" "$pkg_name" "$pkg"
-				RESULT="1"
-			else
-				continue
-			fi
 		fi
 		i=$(($i+1))
 	done
-	echo ""
-}
-
-show_update_title()
-{
-	if [ "$SHOW_UPDATE_TITLE" == "0" ];then
-		printf "     %-80s%-80sResult\n" "System" "Patch"
-		SHOW_UPDATE_TITLE="1"
-	fi
 }
 
 check_update ()
@@ -307,15 +360,17 @@ check_in_iso()
 	i=1
 	for pkg in $ISORPMS;
 	do
-		pkg_name=`rpm -qpi "$ISO_PACK_DIR""$pkg" 2>/dev/null | grep "Name" | awk -F'Name[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+		pkg_info=`rpm -qpi "$ISO_PACK_DIR""$pkg" 2>/dev/null`
+		pkg_name=`echo "$pkg_info" | grep "Name" | awk -F'Name[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
 
 		res=`check_install "$pkg_name"`
 		if [ "$res" == "0" ];then
-			pkg_iso_ver=`rpm -qpi "$ISO_PACK_DIR""$pkg" 2>/dev/null | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
-			pkg_iso_release=`rpm -qpi "$ISO_PACK_DIR""$pkg" 2>/dev/null | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_iso_ver=`echo "$pkg_info" | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_iso_release=`echo "$pkg_info" | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
 			pkg_sys_name=`rpm -qa $pkg_name`
-			pkg_ver=`rpm -qi "$pkg_name" | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
-			pkg_release=`rpm -qi "$pkg_name" | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_sys_info=`rpm -qi "$pkg_name"`
+			pkg_ver=`echo "$pkg_sys_info" | grep "Version" | awk -F'Version[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
+			pkg_release=`echo "$pkg_sys_info" | grep "Release" | awk -F'Release[ \f\r\t\v]*:[ \f\r\t\v]*' '{print $2}'`
 			ver_res=`compare_ver "$pkg_ver" "$pkg_iso_ver"`
 
 			#	0 - $1 < $2
@@ -380,6 +435,7 @@ main ()
 		ISORPMS=`ls "$ISO_PACK_DIR"`
 		check_in_iso
 		umount "./.tmp_mnt_iso"
+		rmdir "./.tmp_mnt_iso"
 		echo ""
 	fi
 
@@ -390,7 +446,7 @@ main ()
 			return
 		fi
 		chmod +x "$PATCH_FILE"
-		#$PATCH_FILE -debug
+		$PATCH_FILE -debug > /dev/null
 		echo ""
 		config_dir_name=`echo "$PATCH_NAME" | awk -F'.patch' '{print $1}'`	
 		PATCH_CONFIG="$PWD"".tmp/""$config_dir_name""/redospatch.cfg"
@@ -403,8 +459,9 @@ main ()
 		get_config_data
 
 		check_ver
-#		check_add
-		check_update
+		check_add
+#		check_update
+		rm -rf "$PWD"".tmp"
 		echo ""
 	fi
 
@@ -414,7 +471,6 @@ main ()
 	else
 		printf "\033[31m %-20s \033[0m\n" "Failed"
 	fi
-	#rm -rf "$PWD"".tmp"
 }
 
 usage()
